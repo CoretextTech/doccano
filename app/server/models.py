@@ -45,7 +45,6 @@ class Project(models.Model):
             url = staticfiles_storage.url('images/cat-3449999_640.jpg')
         elif self.is_type_of(self.Seq2seq):
             url = staticfiles_storage.url('images/tiger-768574_640.jpg')
-
         return url
 
     def get_template_name(self):
@@ -140,7 +139,8 @@ class Label(models.Model):
 
 class Document(models.Model):
     text = models.TextField()
-    project = models.ForeignKey(Project, related_name='documents', on_delete=models.CASCADE)
+    project = models.ForeignKey(Project, related_name='documents',
+                                on_delete=models.CASCADE)
 
     def get_annotations(self):
         if self.project.is_type_of(Project.DOCUMENT_CLASSIFICATION):
@@ -166,14 +166,19 @@ class Document(models.Model):
 
     def make_dataset_for_sequence_labeling(self):
         annotations = self.get_annotations()
-        dataset = [[self.id, ch, 'O'] for ch in self.text]
-        for a in annotations:
-            for i in range(a.start_offset, a.end_offset):
-                if i == a.start_offset:
-                    dataset[i][2] = 'B-{}'.format(a.label.text)
-                else:
-                    dataset[i][2] = 'I-{}'.format(a.label.text)
-        return dataset
+        text = self.text
+
+        return {
+            'text': text,
+            'entities': [
+                {
+                    'start': a.start_offset,
+                    'end': a.end_offset,
+                    'entity': a.label.text,
+                    'value': text[a.start_offset:a.end_offset]
+                } for a in annotations
+            ]
+        }
 
     def make_dataset_for_seq2seq(self):
         annotations = self.get_annotations()
@@ -195,7 +200,8 @@ class Annotation(models.Model):
 
 
 class DocumentAnnotation(Annotation):
-    document = models.ForeignKey(Document, related_name='doc_annotations', on_delete=models.CASCADE)
+    document = models.ForeignKey(Document, related_name='doc_annotations',
+                                 on_delete=models.CASCADE)
     label = models.ForeignKey(Label, on_delete=models.CASCADE)
 
     class Meta:
@@ -203,7 +209,8 @@ class DocumentAnnotation(Annotation):
 
 
 class SequenceAnnotation(Annotation):
-    document = models.ForeignKey(Document, related_name='seq_annotations', on_delete=models.CASCADE)
+    document = models.ForeignKey(Document, related_name='seq_annotations',
+                                 on_delete=models.CASCADE)
     label = models.ForeignKey(Label, on_delete=models.CASCADE)
     start_offset = models.IntegerField()
     end_offset = models.IntegerField()
@@ -217,7 +224,8 @@ class SequenceAnnotation(Annotation):
 
 
 class Seq2seqAnnotation(Annotation):
-    document = models.ForeignKey(Document, related_name='seq2seq_annotations', on_delete=models.CASCADE)
+    document = models.ForeignKey(Document, related_name='seq2seq_annotations',
+                                 on_delete=models.CASCADE)
     text = models.TextField()
 
     class Meta:

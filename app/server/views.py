@@ -1,4 +1,7 @@
 import csv
+import json
+import re
+import string
 from io import TextIOWrapper
 
 from django.urls import reverse
@@ -11,7 +14,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 
 from .permissions import SuperUserMixin
 from .forms import ProjectForm
-from .models import Document, Project
+from .models import Document, Project, SequenceAnnotation, Label
 
 
 class IndexView(TemplateView):
@@ -54,22 +57,92 @@ class GuidelineView(SuperUserMixin, LoginRequiredMixin, TemplateView):
 class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
     template_name = 'admin/dataset_upload.html'
 
+    re_item = re.compile(r'\s*[-\*+]\s*(.+)')
+    re_comment = re.compile(r'<!--[\s\S]*?--!*>', re.MULTILINE)
+    re_entity = re.compile(r'\[(?P<text>[^\]]+)'
+                           r'\]\((?P<label>\w*?)'
+                           r'(?:\:(?P<value>[^)]+))?\)')
+
     def post(self, request, *args, **kwargs):
         project = get_object_or_404(Project, pk=kwargs.get('project_id'))
         try:
             form_data = TextIOWrapper(request.FILES['csv_file'].file, encoding='utf-8')
             if project.is_type_of(Project.SEQUENCE_LABELING):
-                Document.objects.bulk_create([Document(
-                    text=line.strip(),
-                    project=project) for line in form_data])
+                texts = form_data.read().split('---')
+                shortcut_gen = self.shortcut_gen()
+                color_gen = self.color_gen()
+
+                for text in texts:
+                    text = text.strip()
+                    if not text:
+                        continue
+
+                    plain_text = re.sub(
+                        self.re_entity, lambda m: m.groupdict()['text'], text)
+                    doc = Document(text=plain_text, project=project)
+                    doc.save()
+
+                    annotations = self.seq_annotations(
+                        project, doc, text, shortcut_gen, color_gen)
+                    SequenceAnnotation.objects.bulk_create(annotations)
             else:
                 reader = csv.reader(form_data)
                 Document.objects.bulk_create([Document(
                     text=line[0].strip(),
-                    project=project) for line in reader])
+                    project=project) for line in reader]
+                )
             return HttpResponseRedirect(reverse('dataset', args=[project.id]))
         except:
             return HttpResponseRedirect(reverse('upload', args=[project.id]))
+
+    def seq_annotations(self, project, doc, text, shortcut_gen, color_gen):
+        annotations = []
+        offset = 0
+
+        for match in re.finditer(self.re_entity, text):
+            annot = match.groupdict()['text']
+            annot_label = match.groupdict()['label']
+
+            try:
+                label = project.labels.get(text=annot_label)
+            except Label.DoesNotExist:
+                label = Label.objects.create(
+                    text=annot_label, project=project,
+                    shortcut=next(shortcut_gen), background_color=next(color_gen)
+                )
+
+            start_offset = match.start() - offset
+            end_offset = start_offset + len(annot)
+            offset += len(match.group(0)) - len(annot)
+            annotations.append(
+                SequenceAnnotation(
+                    document=doc, label=label, user_id=self.request.user.id,
+                    start_offset=start_offset, end_offset=end_offset
+                )
+            )
+
+        return annotations
+
+    def shortcut_gen(self):
+        for char in string.ascii_lowercase:
+            yield char
+
+    def color_gen(self):
+        yield '#66ffcc'
+        yield '#ffc34d'
+        yield '#00e600'
+        yield '#4d9900'
+        yield '#8cd9b3'
+        yield '#3399ff'
+        yield '#ff5c33'
+        yield '#b300b3'
+        yield '#cccc00'
+        yield '#751aff'
+        yield '#ff8080'
+        yield '#d279a6'
+        yield '#6666cc'
+        yield '#00e6e6'
+        yield '#cc6600'
 
 
 class DataDownload(SuperUserMixin, LoginRequiredMixin, View):
@@ -79,13 +152,11 @@ class DataDownload(SuperUserMixin, LoginRequiredMixin, View):
         project = get_object_or_404(Project, pk=project_id)
         docs = project.get_documents(is_null=False).distinct()
         filename = '_'.join(project.name.lower().split())
-        response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = 'attachment; filename="{}.csv"'.format(filename)
-
-        writer = csv.writer(response)
-        for d in docs:
-            writer.writerows(d.make_dataset())
-
+        response = HttpResponse(content_type='application/json')
+        response['Content-Disposition'] = 'attachment; filename="{}.json"'.format(
+            filename)
+        dataset = [d.make_dataset() for d in docs]
+        response.content = json.dumps(dataset, ensure_ascii=False, indent=4)
         return response
 
 

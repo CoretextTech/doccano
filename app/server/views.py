@@ -35,7 +35,7 @@ class ProjectsView(LoginRequiredMixin, CreateView):
 
 class DatasetView(SuperUserMixin, LoginRequiredMixin, ListView):
     template_name = 'admin/dataset.html'
-    paginate_by = 5
+    paginate_by = 10
 
     def get_queryset(self):
         project = get_object_or_404(Project, pk=self.kwargs['project_id'])
@@ -100,8 +100,9 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
         offset = 0
 
         for match in re.finditer(self.re_entity, text):
-            annot = match.groupdict()['text']
-            annot_label = match.groupdict()['label']
+            groupdict = match.groupdict()
+            annot = groupdict['text']
+            annot_label = groupdict['label']
 
             try:
                 label = project.labels.get(text=annot_label)

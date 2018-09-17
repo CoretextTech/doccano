@@ -135,7 +135,7 @@ class AnnotationList(generics.ListCreateAPIView):
 
 
 class AnnotationDetail(generics.RetrieveUpdateDestroyAPIView):
-    permission_classes = (IsAuthenticated, IsProjectUser, IsOwnAnnotation)
+    permission_classes = (IsAuthenticated, IsProjectUser)
 
     def get_serializer_class(self):
         project = get_object_or_404(Project, pk=self.kwargs['project_id'])

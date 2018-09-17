@@ -5,7 +5,6 @@ from .models import DocumentAnnotation, SequenceAnnotation, Seq2seqAnnotation
 
 
 class LabelSerializer(serializers.ModelSerializer):
-
     class Meta:
         model = Label
         fields = ('id', 'text', 'shortcut', 'background_color', 'text_color')
@@ -73,7 +72,7 @@ class ClassificationDocumentSerializer(serializers.ModelSerializer):
     def get_annotations(self, instance):
         request = self.context.get('request')
         if request:
-            annotations = instance.doc_annotations.filter(user=request.user)
+            annotations = instance.doc_annotations  # .filter(user=request.user)
             serializer = DocumentAnnotationSerializer(annotations, many=True)
             return serializer.data
 
@@ -88,7 +87,7 @@ class SequenceDocumentSerializer(serializers.ModelSerializer):
     def get_annotations(self, instance):
         request = self.context.get('request')
         if request:
-            annotations = instance.seq_annotations.filter(user=request.user)
+            annotations = instance.seq_annotations.all()  # .filter(user=request.user)
             serializer = SequenceAnnotationSerializer(annotations, many=True)
             return serializer.data
 
@@ -103,7 +102,7 @@ class Seq2seqDocumentSerializer(serializers.ModelSerializer):
     def get_annotations(self, instance):
         request = self.context.get('request')
         if request:
-            annotations = instance.seq2seq_annotations.filter(user=request.user)
+            annotations = instance.seq2seq_annotations # .filter(user=request.user)
             serializer = Seq2seqAnnotationSerializer(annotations, many=True)
             return serializer.data
 

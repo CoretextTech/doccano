@@ -31,7 +31,7 @@ class Project(models.Model):
     def is_type_of(self, project_type):
         return project_type == self.project_type
 
-    def get_progress(self, user):
+    def get_progress(self, user=None):
         docs = self.get_documents(is_null=True, user=user)
         total = self.documents.count()
         remaining = docs.count()

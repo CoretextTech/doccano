@@ -1,5 +1,6 @@
 import csv
 import json
+import os
 import re
 import string
 from io import TextIOWrapper
@@ -66,31 +67,55 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
     def post(self, request, *args, **kwargs):
         project = get_object_or_404(Project, pk=kwargs.get('project_id'))
         try:
-            form_data = TextIOWrapper(request.FILES['csv_file'].file, encoding='utf-8')
+            form_data = TextIOWrapper(request.FILES['input_file'].file, encoding='utf-8')
+
             if project.is_type_of(Project.SEQUENCE_LABELING):
-                texts = form_data.read().split('---')
-                shortcut_gen = self.shortcut_gen()
-                color_gen = self.color_gen()
+                _, ext = os.path.splitext(request.FILES['input_file'].name)
 
-                for text in texts:
-                    text = text.strip()
-                    if not text:
-                        continue
+                if ext.lower() == '.json':
+                    shortcut_gen = self.shortcut_gen()
+                    color_gen = self.color_gen()
 
-                    plain_text = re.sub(
-                        self.re_entity, lambda m: m.groupdict()['text'], text)
-                    doc = Document(text=plain_text, project=project)
-                    doc.save()
+                    for annot in json.load(form_data):
+                        text = annot.get("text", "")
+                        if not text:
+                            continue
 
-                    annotations = self.seq_annotations(
-                        project, doc, text, shortcut_gen, color_gen)
-                    SequenceAnnotation.objects.bulk_create(annotations)
+                        doc = Document(text=text, project=project)
+                        doc.save()
+
+                        annotations = []
+                        for ent in annot.get("entities", []):
+                            try:
+                                label = project.labels.get(text=ent['entity'])
+                            except Label.DoesNotExist:
+                                label = Label.objects.create(
+                                    text=ent['entity'], project=project,
+                                    shortcut=next(shortcut_gen),
+                                    background_color=next(color_gen)
+                                )
+                            annotations.append(
+                                SequenceAnnotation(
+                                    document=doc, label=label,
+                                    user_id=self.request.user.id,
+                                    start_offset=ent['start'], end_offset=ent['end']
+                                )
+                            )
+                        if annotations:
+                            SequenceAnnotation.objects.bulk_create(annotations)
+                else:
+                    reader = csv.reader(form_data)
+                    Document.objects.bulk_create([Document(
+                        text=line[0].strip(),
+                        project=project) for line in reader]
+                    )
             else:
                 reader = csv.reader(form_data)
                 Document.objects.bulk_create([Document(
                     text=line[0].strip(),
                     project=project) for line in reader]
                 )
+
             return HttpResponseRedirect(reverse('dataset', args=[project.id]))
         except:
             return HttpResponseRedirect(reverse('upload', args=[project.id]))

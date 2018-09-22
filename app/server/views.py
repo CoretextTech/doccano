@@ -1,10 +1,11 @@
-import csv
+import bz2
 import json
 import os
 import re
 import string
 from io import TextIOWrapper
 
+import six
 from django.urls import reverse
 from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
@@ -67,87 +68,55 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
     def post(self, request, *args, **kwargs):
         project = get_object_or_404(Project, pk=kwargs.get('project_id'))
         try:
-            form_data = TextIOWrapper(request.FILES['input_file'].file, encoding='utf-8')
+            file = request.FILES['input_file'].file
+            filename = request.FILES['input_file'].name
+            _, ext = os.path.splitext(filename)
 
-            if project.is_type_of(Project.SEQUENCE_LABELING):
-                _, ext = os.path.splitext(request.FILES['input_file'].name)
+            if ext.lower() not in ('.json', '.bz2'):
+                raise ValueError(ext)
 
-                if ext.lower() == '.json':
-                    shortcut_gen = self.shortcut_gen()
-                    color_gen = self.color_gen()
-
-                    for annot in json.load(form_data):
-                        text = annot.get("text", "")
-                        if not text:
-                            continue
-
-                        doc = Document(text=text, project=project)
-                        doc.save()
-
-                        annotations = []
-                        for ent in annot.get("entities", []):
-                            try:
-                                label = project.labels.get(text=ent['entity'])
-                            except Label.DoesNotExist:
-                                label = Label.objects.create(
-                                    text=ent['entity'], project=project,
-                                    shortcut=next(shortcut_gen),
-                                    background_color=next(color_gen)
-                                )
-                            annotations.append(
-                                SequenceAnnotation(
-                                    document=doc, label=label,
-                                    user_id=self.request.user.id,
-                                    start_offset=ent['start'], end_offset=ent['end']
-                                )
-                            )
-                        if annotations:
-                            SequenceAnnotation.objects.bulk_create(annotations)
-                else:
-                    reader = csv.reader(form_data)
-                    Document.objects.bulk_create([Document(
-                        text=line[0].strip(),
-                        project=project) for line in reader]
-                    )
+            if ext.lower() == '.bz2':
+                content = bz2.BZ2File(file).read().decode('utf-8').splitlines()
             else:
-                reader = csv.reader(form_data)
-                Document.objects.bulk_create([Document(
-                    text=line[0].strip(),
-                    project=project) for line in reader]
-                )
+                content = TextIOWrapper(file, encoding='utf-8').readlines()
+
+            shortcut_gen = self.shortcut_gen()
+            color_gen = self.color_gen()
+
+            for doc in content:
+                if isinstance(doc, six.string_types):
+                    doc = json.loads(doc)
+                text = doc.get("text")
+                if not text:
+                    continue
+
+                document = Document(text=text, project=project)
+                document.save()
+
+                if project.is_type_of(Project.SEQUENCE_LABELING):
+                    annotations = []
+                    for ent in doc.get("entities", []):
+                        try:
+                            label = project.labels.get(text=ent['entity'])
+                        except Label.DoesNotExist:
+                            label = Label.objects.create(
+                                text=ent['entity'], project=project,
+                                shortcut=next(shortcut_gen),
+                                background_color=next(color_gen)
+                            )
+                        annotations.append(
+                            SequenceAnnotation(
+                                document=document, label=label,
+                                user_id=self.request.user.id,
+                                start_offset=ent['start'], end_offset=ent['end']
+                            )
+                        )
+                    if annotations:
+                        SequenceAnnotation.objects.bulk_create(annotations)
 
             return HttpResponseRedirect(reverse('dataset', args=[project.id]))
         except:
             return HttpResponseRedirect(reverse('upload', args=[project.id]))
-
-    def seq_annotations(self, project, doc, text, shortcut_gen, color_gen):
-        annotations = []
-        offset = 0
-
-        for match in re.finditer(self.re_entity, text):
-            groupdict = match.groupdict()
-            annot = groupdict['text']
-            annot_label = groupdict['label']
-
-            try:
-                label = project.labels.get(text=annot_label)
-            except Label.DoesNotExist:
-                label = Label.objects.create(
-                    text=annot_label, project=project,
-                    shortcut=next(shortcut_gen), background_color=next(color_gen)
-                )
-
-            start_offset = match.start() - offset
-            end_offset = start_offset + len(annot)
-            offset += len(match.group(0)) - len(annot)
-            annotations.append(
-                SequenceAnnotation(
-                    document=doc, label=label, user_id=self.request.user.id,
-                    start_offset=start_offset, end_offset=end_offset
-                )
-            )
-
-        return annotations
 
     def shortcut_gen(self):
         for char in string.ascii_lowercase:
@@ -177,12 +146,26 @@ class DataDownload(SuperUserMixin, LoginRequiredMixin, View):
         project_id = self.kwargs['project_id']
         project = get_object_or_404(Project, pk=project_id)
         docs = project.get_documents(is_null=False).distinct()
-        filename = '_'.join(project.name.lower().split())
+        return self.jsonify(project, docs)
+
+    def jsonify(self, project, docs, compression=True, lines=True):
+        filename = '{}.json'.format('_'.join(project.name.lower().split()))
+        if compression:
+            filename += '.bz2'
+
         response = HttpResponse(content_type='application/json')
-        response['Content-Disposition'] = 'attachment; filename="{}.json"'.format(
-            filename)
+        response['Content-Disposition'] = 'attachment; filename="{}"'.format(filename)
         dataset = [d.make_dataset() for d in docs]
-        response.content = json.dumps(dataset, ensure_ascii=False, indent=4)
+
+        if lines:
+            content = '\n'.join([json.dumps(doc, ensure_ascii=False) for doc in dataset])
+        else:
+            content = json.dumps(dataset, ensure_ascii=False)
+
+        if compression:
+            content = bz2.compress(content.encode('utf-8', errors='ignore'))
+
+        response.content = content
         return response
 
 

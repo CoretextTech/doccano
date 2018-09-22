@@ -160,9 +160,12 @@ class Document(models.Model):
 
     def make_dataset_for_classification(self):
         annotations = self.get_annotations()
-        dataset = [[a.document.id, a.document.text, a.label.text, a.user.username]
-                   for a in annotations]
-        return dataset
+        text = self.text
+
+        return {
+            'text': text,
+            'labels': [a.label.text for a in annotations]
+        }
 
     def make_dataset_for_sequence_labeling(self):
         annotations = self.get_annotations()
@@ -182,9 +185,12 @@ class Document(models.Model):
 
     def make_dataset_for_seq2seq(self):
         annotations = self.get_annotations()
-        dataset = [[a.document.id, a.document.text, a.text, a.user.username]
-                   for a in annotations]
-        return dataset
+        text = self.text
+
+        return {
+            'text': text,
+            'entities': [a.text for a in annotations]
+        }
 
     def __str__(self):
         return self.text[:50]

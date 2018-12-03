@@ -193,6 +193,6 @@ fabric.properties
 [Ss]cripts
 pyvenv.cfg
 pip-selfcheck.json
-
+db.sqlite3
 /data/raw/*
 /data/sparql/*

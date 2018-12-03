@@ -96,11 +96,17 @@ class DataUpload(SuperUserMixin, LoginRequiredMixin, TemplateView):
                 if project.is_type_of(Project.SEQUENCE_LABELING):
                     annotations = []
                     for ent in doc.get("entities", []):
+                        label_text = ent['entity']
+
+                        if 'value' in ent:
+                            if ent['value'] != text[ent['start']:ent['end']]:
+                                label_text += f"{ent['value']}"
+
                         try:
-                            label = project.labels.get(text=ent['entity'])
+                            label = project.labels.get(text=label_text)
                         except Label.DoesNotExist:
                             label = Label.objects.create(
-                                text=ent['entity'], project=project,
+                                text=label_text, project=project,
                                 shortcut=next(shortcut_gen),
                                 background_color=next(color_gen)
                             )
